@@ -1,0 +1,194 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Copyright SiteGuarding CY Ltd. All rights reserved. (c) 2013-2021
+ * 
+ * ver.: 2.2
+ * date: 10 Feb 2021
+ */
+
+define( 'LICENSE', '059A7-ZAIIZ-VR7K9-MRMCR-PL1IS-VC9KJ');
+
+define( 'MALSSH_VERSION', '2.2');
+
+/*
+if (PHP_SAPI !== 'cli') 
+{
+    echo 'Error: MalSSH must be run as a CLI application.';
+    exit(1);
+}*/
+
+$php_version = floatval(substr(PHP_VERSION, 0, 3));
+if ($php_version < 5.6)
+{
+	echo 'Error: Not supported PHP version.'."\n\n";
+    exit(1);
+}
+
+define( 'MALSSH_PHP_VERSION', $php_version);
+
+
+if (!function_exists('openssl_public_encrypt'))
+{
+	echo 'Error: PHP function "openssl_public_encrypt" is required.'."\n\n";
+    exit(1);
+}
+
+
+$extensions = get_loaded_extensions();
+if (!malssh_check_ioncube_version()) 
+{
+	echo 'Error: IonCube Loader version 10 or higher is required for this plugin.'."\n\n";
+    exit(1);
+}
+
+
+ignore_user_abort(true);
+error_reporting( 0 );
+ini_set('error_log',NULL);
+ini_set('log_errors',0);
+ini_set('max_execution_time',0);
+set_time_limit ( 0 );
+ini_set('post_max_size', '64M');
+ini_set('upload_max_filesize', '64M');
+ini_set('memory_limit', '2048M');
+
+
+$scan_path = dirname(__FILE__);
+$options = getopt("s:h", array("scan:", "help"));
+if (isset($options['s'])) $scan_path = $options['s'];
+if (isset($options['scan'])) $scan_path = $options['scan'];
+
+if (is_array($scan_path)) $scan_path = $scan_path[0];
+
+define( 'MALSSH_SCAN_PATH', $scan_path);
+define( 'MALSSH_PATHCHECK', md5($scan_path));
+
+// Help & Stats
+if (isset($options['h']) || isset($options['help']))
+{
+    $host= gethostname();
+    $ip = gethostbyname($host);
+    
+    echo "\n";
+    echo 'Copyright (c) 2013-'.date("Y")."\n";
+    echo 'MalSSH scanner ver. '.MALSSH_VERSION.' by SiteGuarding.com'."\n\n";
+    echo 'Usage:'."\n\n";
+    echo 'malssh [-s path] [-r report ] [-o type]'."\n\n";
+    echo '-s, --scan      path to scan'."\n";
+    echo '-r, --report    save report to file (default: malware_report.log)'."\n";
+    echo '-o, --output    output type: file|screen|all'."\n";
+    echo '                file   - save report to file only'."\n";
+    echo '                screen - show report on screen only'."\n";
+    echo '                all    - save and show report (default)'."\n";
+    
+    echo "\n";
+    
+    echo 'malssh -s="/home/account/public_html/"'."\n";
+    echo 'malssh -r="/home/account/report.txt"'."\n";
+    echo 'malssh -o="file" -r="/home/account/report.txt"'."\n";
+    
+    echo "\n";
+    
+    echo 'Server & Scanner Information'."\n";
+    echo 'Scanner version   : '.MALSSH_VERSION."\n";
+    echo 'Scanner license   : '.LICENSE."\n";
+    echo 'PHP version       : '.MALSSH_PHP_VERSION."\n";
+    echo 'Server IP         : '.$ip."\n";
+    echo 'Default scan path : '.MALSSH_SCAN_PATH."\n";
+    echo "\n";
+    exit(0);
+}
+
+$post_array = array(
+    'action' => 'start',
+    'license' => LICENSE,
+    'phpver' => MALSSH_PHP_VERSION,
+    'pathcheck' => MALSSH_PATHCHECK,
+);
+
+if (function_exists('curl_exec'))
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, "https://www.siteguarding.com/ext/malssh/index.php");
+    curl_setopt($ch, CURLOPT_POST, true); 
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $post_array); 
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    $scanner = curl_exec($ch);
+    curl_close($ch);
+
+} else {
+    $postdata = http_build_query($post_array);
+
+    $opts = array('http' =>
+        array(
+            'method'  => 'POST',
+            'header'  => 'Content-type: application/x-www-form-urlencoded',
+            'content' => $postdata
+            )
+        );
+
+    $context = stream_context_create($opts);
+    $scanner = file_get_contents("https://www.siteguarding.com/ext/malssh/index.php", false, $context);
+}
+
+if ($scanner === false) { echo 'Error: Unable to connect to SiteGuarding.com server. Outgoing connection is blocked on the server.'."\n\n"; exit(1); }
+
+$result = (array)json_decode($scanner, true);
+
+if (isset($result['status']))
+{
+    if ($result['status'] == 'ok')
+    {
+        $file = tmpfile();
+        fwrite($file, $result['keys_code']);
+        $var = stream_get_meta_data($file);
+        include($var["uri"]);
+        
+        $file = tmpfile();
+        fwrite($file, $result['loader_code']);
+        $var = stream_get_meta_data($file);
+        include($var["uri"]);
+    }
+    else { echo 'Error: Exit. Status: '.$result['status'].' Reason: '.$result['reason']."\n\n"; exit(1); }   
+}
+else { echo 'Error: Scanner module is corrupted. Please contact https://www.siteguarding.com/en/contacts'."\n\n";  exit(1); }  
+
+// END
+die();
+
+
+
+
+
+
+function malssh_check_ioncube_version()
+{
+    ob_start();
+    phpinfo(INFO_GENERAL);
+    $aux = str_replace('&nbsp;', ' ', ob_get_clean());
+    if($aux !== false)
+    {
+        $pos = mb_stripos($aux, 'ionCube PHP Loader');
+        if($pos !== false)
+        {
+            $aux = mb_substr($aux, $pos + 18);
+            $aux = mb_substr($aux, mb_stripos($aux, ' v') + 2);
+
+            $version = '';
+            $c = 0;
+            $char = mb_substr($aux, $c++, 1);
+            while(mb_strpos('0123456789.', $char) !== false)
+            {
+                $version .= $char;
+                $char = mb_substr($aux, $c++, 1);
+            }
+
+            return ($version >= 10);
+        }
+    }
+
+    return false;
+}
